@@ -1,84 +1,192 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import ChatHeader from "./components/ChatHeader";
 import MessageList, { Message } from "./components/MessageList";
 import ChatInput from "./components/ChatInput";
-import LanguageSelector from "./components/LanguageSelector";
 import {
   LANGUAGE_STORAGE_KEY,
+  PERMISSIONS_STORAGE_KEY,
+  ONBOARDING_COMPLETE_KEY,
   getGreetingMessage,
+  ONBOARDING_MESSAGES,
+  parseYesNo,
+  parseLanguageSelection,
+  getLanguageByNumber,
 } from "./utils/languages";
+
+// Onboarding stages
+type OnboardingStage = 
+  | "welcome" 
+  | "awaiting_permission" 
+  | "awaiting_language" 
+  | "complete";
 
 export default function Home() {
   const [selectedLanguage, setSelectedLanguage] = useState<string | null>(null);
-  const [showLanguageSelector, setShowLanguageSelector] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [onboardingStage, setOnboardingStage] = useState<OnboardingStage>("welcome");
+  const [micPermissionGranted, setMicPermissionGranted] = useState(false);
 
-  // Initialize language preference and greeting message on mount
+  // Helper to create a timestamp
+  const getTimestamp = () => {
+    return new Date().toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  };
+
+  // Helper to add an AI message
+  const addAIMessage = useCallback((text: string) => {
+    const aiMessage: Message = {
+      id: Date.now(),
+      message: text,
+      timestamp: getTimestamp(),
+      sent: false,
+      type: 'text',
+    };
+    setMessages((prev) => [...prev, aiMessage]);
+  }, []);
+
+  // Initialize onboarding or restore session
   useEffect(() => {
+    const onboardingComplete = localStorage.getItem(ONBOARDING_COMPLETE_KEY);
     const savedLanguage = localStorage.getItem(LANGUAGE_STORAGE_KEY);
-    if (savedLanguage) {
+    const savedPermissions = localStorage.getItem(PERMISSIONS_STORAGE_KEY);
+
+    if (onboardingComplete === "true" && savedLanguage) {
+      // User has completed onboarding before
       setSelectedLanguage(savedLanguage);
-      // Set initial greeting in the saved language
+      setMicPermissionGranted(savedPermissions === "true");
+      setOnboardingStage("complete");
       setMessages([
         {
           id: 1,
           message: getGreetingMessage(savedLanguage),
-          timestamp: new Date().toLocaleTimeString("en-US", {
-            hour: "numeric",
-            minute: "2-digit",
-          }),
+          timestamp: getTimestamp(),
           sent: false,
         },
       ]);
     } else {
-      // Show language selector if no preference exists
-      setShowLanguageSelector(true);
+      // Start fresh onboarding
+      setOnboardingStage("awaiting_permission");
+      setMessages([
+        {
+          id: 1,
+          message: ONBOARDING_MESSAGES.welcome,
+          timestamp: getTimestamp(),
+          sent: false,
+        },
+      ]);
     }
   }, []);
 
-  const handleLanguageSelect = (languageCode: string) => {
-    setSelectedLanguage(languageCode);
-    // Set initial greeting in the selected language
-    setMessages([
-      {
-        id: 1,
-        message: getGreetingMessage(languageCode),
-        timestamp: new Date().toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-        }),
-        sent: false,
-      },
-    ]);
+  // Handle language selection from header (for changing language later)
+  const handleLanguageChange = () => {
+    // Show language selection prompt in chat
+    addAIMessage(`Would you like to change your language? Please type the number of your preferred language:
+
+1. English
+2. हिंदी (Hindi)
+3. বাংলা (Bengali)
+4. தமிழ் (Tamil)
+5. తెలుగు (Telugu)
+6. ગુજરાતી (Gujarati)
+7. ಕನ್ನಡ (Kannada)
+8. മലയാളം (Malayalam)
+9. मराठी (Marathi)
+10. ਪੰਜਾਬੀ (Punjabi)
+11. ଓଡ଼ିଆ (Odia)
+
+Just type a number between 1 and 11.`);
+    setOnboardingStage("awaiting_language");
   };
 
-  const handleLanguageChange = () => {
-    setShowLanguageSelector(true);
+  // Process onboarding responses
+  const handleOnboardingResponse = (messageText: string): boolean => {
+    if (onboardingStage === "awaiting_permission") {
+      const response = parseYesNo(messageText);
+      
+      if (response === null) {
+        // Invalid response
+        setTimeout(() => {
+          addAIMessage(ONBOARDING_MESSAGES.invalidPermissionResponse);
+        }, 500);
+        return true;
+      }
+
+      if (response) {
+        // User said yes to microphone
+        setMicPermissionGranted(true);
+        localStorage.setItem(PERMISSIONS_STORAGE_KEY, "true");
+        setOnboardingStage("awaiting_language");
+        setTimeout(() => {
+          addAIMessage(ONBOARDING_MESSAGES.microphoneGranted);
+        }, 500);
+      } else {
+        // User said no
+        setMicPermissionGranted(false);
+        localStorage.setItem(PERMISSIONS_STORAGE_KEY, "false");
+        setOnboardingStage("awaiting_language");
+        setTimeout(() => {
+          addAIMessage(ONBOARDING_MESSAGES.microphoneDenied);
+        }, 500);
+      }
+      return true;
+    }
+
+    if (onboardingStage === "awaiting_language") {
+      const langNum = parseLanguageSelection(messageText);
+      
+      if (langNum === null) {
+        // Invalid response
+        setTimeout(() => {
+          addAIMessage(ONBOARDING_MESSAGES.invalidLanguageResponse);
+        }, 500);
+        return true;
+      }
+
+      const language = getLanguageByNumber(langNum);
+      if (language) {
+        setSelectedLanguage(language.code);
+        localStorage.setItem(LANGUAGE_STORAGE_KEY, language.code);
+        localStorage.setItem(ONBOARDING_COMPLETE_KEY, "true");
+        setOnboardingStage("complete");
+        setTimeout(() => {
+          addAIMessage(ONBOARDING_MESSAGES.getLanguageConfirmation(language));
+        }, 500);
+      }
+      return true;
+    }
+
+    return false; // Not an onboarding message
   };
 
   const handleSendMessage = async (messageText: string) => {
-    // Don't allow sending if language is not selected
-    if (!selectedLanguage) {
-      return;
-    }
-
-    // Add user message
+    // Add user message to chat
     const userMessage: Message = {
       id: Date.now(),
       message: messageText,
-      timestamp: new Date().toLocaleTimeString("en-US", {
-        hour: "numeric",
-        minute: "2-digit",
-      }),
+      timestamp: getTimestamp(),
       sent: true,
       read: false,
       type: 'text',
     };
 
     setMessages((prev) => [...prev, userMessage]);
+
+    // Check if this is an onboarding response
+    if (onboardingStage !== "complete") {
+      handleOnboardingResponse(messageText);
+      return;
+    }
+
+    // Don't allow sending if language is not selected (safety check)
+    if (!selectedLanguage) {
+      return;
+    }
+
     setIsLoading(true);
 
     try {
@@ -141,10 +249,7 @@ export default function Home() {
       const errorMessage: Message = {
         id: Date.now() + 1,
         message: "Sorry, I couldn't process your message. Please try again.",
-        timestamp: new Date().toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-        }),
+        timestamp: getTimestamp(),
         sent: false,
         type: 'text',
       };
@@ -155,7 +260,12 @@ export default function Home() {
   };
 
   const handleVoiceSend = async (audioBlob: Blob, duration: number) => {
-    if (!selectedLanguage) {
+    // During onboarding, voice is not fully set up yet
+    if (onboardingStage !== "complete" || !selectedLanguage) {
+      // Show a message that voice is not available during onboarding
+      if (onboardingStage !== "complete") {
+        addAIMessage("Please complete the setup first by typing your response. Voice messages will be available after setup is complete.");
+      }
       return;
     }
 
@@ -173,10 +283,7 @@ export default function Home() {
       const voiceMessage: Message = {
         id: Date.now(),
         message: "Voice message",
-        timestamp: new Date().toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-        }),
+        timestamp: getTimestamp(),
         sent: true,
         read: false,
         type: 'voice',
@@ -260,10 +367,7 @@ export default function Home() {
       const errorMessage: Message = {
         id: Date.now() + 1,
         message: "Sorry, I couldn't process your voice message. Please try again.",
-        timestamp: new Date().toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-        }),
+        timestamp: getTimestamp(),
         sent: false,
         type: 'text',
       };
@@ -274,7 +378,11 @@ export default function Home() {
   };
 
   const handleImageSend = async (imageFile: File, caption?: string) => {
-    if (!selectedLanguage) {
+    // During onboarding, image sending is not available
+    if (onboardingStage !== "complete" || !selectedLanguage) {
+      if (onboardingStage !== "complete") {
+        addAIMessage("Please complete the setup first by typing your response. Image sharing will be available after setup is complete.");
+      }
       return;
     }
 
@@ -292,10 +400,7 @@ export default function Home() {
       const imageMessage: Message = {
         id: Date.now(),
         message: caption || "Image",
-        timestamp: new Date().toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-        }),
+        timestamp: getTimestamp(),
         sent: true,
         read: false,
         type: 'image',
@@ -360,10 +465,7 @@ export default function Home() {
       const errorMessage: Message = {
         id: Date.now() + 1,
         message: "Sorry, I couldn't analyze your image. Please try again.",
-        timestamp: new Date().toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-        }),
+        timestamp: getTimestamp(),
         sent: false,
         type: 'text',
       };
@@ -375,13 +477,6 @@ export default function Home() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-900">
-      {/* Language Selector Modal */}
-      <LanguageSelector
-        isOpen={showLanguageSelector}
-        onClose={() => setShowLanguageSelector(false)}
-        onSelect={handleLanguageSelect}
-      />
-
       {/* Mobile Container */}
       <main className="relative flex h-screen w-full max-w-md flex-col overflow-hidden bg-[var(--wa-bg)] shadow-2xl">
         {/* Chat Header */}
@@ -393,12 +488,12 @@ export default function Home() {
         {/* Messages Area */}
         <MessageList messages={messages} isTyping={isLoading} />
 
-        {/* Chat Input */}
+        {/* Chat Input - always enabled during onboarding for text input */}
         <ChatInput
           onSend={handleSendMessage}
           onVoiceSend={handleVoiceSend}
           onImageSend={handleImageSend}
-          disabled={isLoading || !selectedLanguage}
+          disabled={isLoading}
         />
       </main>
     </div>
