@@ -7,6 +7,11 @@ export interface Message {
   timestamp: string;
   sent: boolean;
   read?: boolean;
+  type?: 'text' | 'voice' | 'image';
+  audioUrl?: string;        // Base64 audio for voice messages
+  audioDuration?: number;   // Duration in seconds
+  imageUrl?: string;        // Base64 or blob URL for images
+  imageCaption?: string;    // Optional caption for images
 }
 
 interface MessageListProps {
@@ -33,6 +38,11 @@ export default function MessageList({ messages, isTyping }: MessageListProps) {
             timestamp={msg.timestamp}
             sent={msg.sent}
             read={msg.read}
+            type={msg.type}
+            audioUrl={msg.audioUrl}
+            audioDuration={msg.audioDuration}
+            imageUrl={msg.imageUrl}
+            imageCaption={msg.imageCaption}
           />
         ))}
         {isTyping && <TypingIndicator />}
