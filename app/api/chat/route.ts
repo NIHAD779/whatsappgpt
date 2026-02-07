@@ -21,6 +21,7 @@ interface Message {
 interface ChatRequest {
   message: string;
   history: Message[];
+  selectedLanguage?: string;
 }
 
 // Initialize rate limiter: 10 requests per day per IP
@@ -61,13 +62,53 @@ export async function POST(request: NextRequest) {
     //   );
     // }
 
-    const { message, history }: ChatRequest = await request.json();
+    const { message, history, selectedLanguage = "en-IN" }: ChatRequest = await request.json();
 
     if (!message || !message.trim()) {
       return NextResponse.json(
         { error: "Message is required" },
         { status: 400 }
       );
+    }
+
+    // Determine if translation is needed
+    const needsTranslation = selectedLanguage !== "en-IN";
+    let messageToProcess = message;
+    let translationError = false;
+
+    // Step 1: Translate user message to English if needed
+    if (needsTranslation) {
+      try {
+        const translationResponse = await fetch(
+          `${request.nextUrl.origin}/api/translate`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-forwarded-for": request.headers.get("x-forwarded-for") || "",
+              "x-real-ip": request.headers.get("x-real-ip") || "",
+            },
+            body: JSON.stringify({
+              input: message,
+              source_language_code: selectedLanguage,
+              target_language_code: "en-IN",
+            }),
+          }
+        );
+
+        if (translationResponse.ok) {
+          const translationData = await translationResponse.json();
+          messageToProcess = translationData.translated_text;
+        } else {
+          console.error("Failed to translate user message to English");
+          translationError = true;
+          // Continue with original message
+        }
+      } catch (error) {
+        console.error("Translation error:", error);
+        translationError = true;
+        // Continue with original message
+      }
     }
 
     // Determine which AI provider to use (default: sarvam)
@@ -109,10 +150,10 @@ export async function POST(request: NextRequest) {
         },
         // Add filtered chat history
         ...historyMessages,
-        // Add current message
+        // Add current message (already translated to English if needed)
         {
           role: "user",
-          content: message,
+          content: messageToProcess,
         },
       ];
 
@@ -168,21 +209,56 @@ export async function POST(request: NextRequest) {
         model,
       ]);
 
-      // Invoke the chain with input and history
+      // Invoke the chain with input and history (using translated message if applicable)
       const response = await chain.invoke({
-        input: message,
+        input: messageToProcess,
         chat_history: chatHistory,
       });
 
       responseContent = response.content as string;
     }
 
+    // Step 2: Translate AI response back to user's language if needed
+    let finalResponse = responseContent;
+    if (needsTranslation && !translationError) {
+      try {
+        const translationResponse = await fetch(
+          `${request.nextUrl.origin}/api/translate`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-forwarded-for": request.headers.get("x-forwarded-for") || "",
+              "x-real-ip": request.headers.get("x-real-ip") || "",
+            },
+            body: JSON.stringify({
+              input: responseContent,
+              source_language_code: "en-IN",
+              target_language_code: selectedLanguage,
+            }),
+          }
+        );
+
+        if (translationResponse.ok) {
+          const translationData = await translationResponse.json();
+          finalResponse = translationData.translated_text;
+        } else {
+          console.error("Failed to translate AI response back to user language");
+          // Return English response if translation fails
+        }
+      } catch (error) {
+        console.error("Translation error:", error);
+        // Return English response if translation fails
+      }
+    }
+
     return NextResponse.json({
-      message: responseContent,
+      message: finalResponse,
       timestamp: new Date().toLocaleTimeString("en-US", {
         hour: "numeric",
         minute: "2-digit",
       }),
+      translationError: translationError,
       // remaining: remaining - 1,
     });
   } catch (error) {

@@ -1,25 +1,70 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import ChatHeader from "./components/ChatHeader";
 import MessageList, { Message } from "./components/MessageList";
 import ChatInput from "./components/ChatInput";
+import LanguageSelector from "./components/LanguageSelector";
+import {
+  LANGUAGE_STORAGE_KEY,
+  getGreetingMessage,
+} from "./utils/languages";
 
 export default function Home() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 1,
-      message: "Hello! I'm Gemini AI. How can I help you today?",
-      timestamp: new Date().toLocaleTimeString("en-US", {
-        hour: "numeric",
-        minute: "2-digit",
-      }),
-      sent: false,
-    },
-  ]);
+  const [selectedLanguage, setSelectedLanguage] = useState<string | null>(null);
+  const [showLanguageSelector, setShowLanguageSelector] = useState(false);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Initialize language preference and greeting message on mount
+  useEffect(() => {
+    const savedLanguage = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+    if (savedLanguage) {
+      setSelectedLanguage(savedLanguage);
+      // Set initial greeting in the saved language
+      setMessages([
+        {
+          id: 1,
+          message: getGreetingMessage(savedLanguage),
+          timestamp: new Date().toLocaleTimeString("en-US", {
+            hour: "numeric",
+            minute: "2-digit",
+          }),
+          sent: false,
+        },
+      ]);
+    } else {
+      // Show language selector if no preference exists
+      setShowLanguageSelector(true);
+    }
+  }, []);
+
+  const handleLanguageSelect = (languageCode: string) => {
+    setSelectedLanguage(languageCode);
+    // Set initial greeting in the selected language
+    setMessages([
+      {
+        id: 1,
+        message: getGreetingMessage(languageCode),
+        timestamp: new Date().toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+        }),
+        sent: false,
+      },
+    ]);
+  };
+
+  const handleLanguageChange = () => {
+    setShowLanguageSelector(true);
+  };
+
   const handleSendMessage = async (messageText: string) => {
+    // Don't allow sending if language is not selected
+    if (!selectedLanguage) {
+      return;
+    }
+
     // Add user message
     const userMessage: Message = {
       id: Date.now(),
@@ -36,7 +81,7 @@ export default function Home() {
     setIsLoading(true);
 
     try {
-      // Call API
+      // Call API with selected language
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
@@ -45,6 +90,7 @@ export default function Home() {
         body: JSON.stringify({
           message: messageText,
           history: messages,
+          selectedLanguage: selectedLanguage,
         }),
       });
 
@@ -83,16 +129,29 @@ export default function Home() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-900">
+      {/* Language Selector Modal */}
+      <LanguageSelector
+        isOpen={showLanguageSelector}
+        onClose={() => setShowLanguageSelector(false)}
+        onSelect={handleLanguageSelect}
+      />
+
       {/* Mobile Container */}
       <main className="relative flex h-screen w-full max-w-md flex-col overflow-hidden bg-[var(--wa-bg)] shadow-2xl">
         {/* Chat Header */}
-        <ChatHeader />
+        <ChatHeader
+          selectedLanguage={selectedLanguage}
+          onLanguageChange={handleLanguageChange}
+        />
 
         {/* Messages Area */}
         <MessageList messages={messages} isTyping={isLoading} />
 
         {/* Chat Input */}
-        <ChatInput onSend={handleSendMessage} disabled={isLoading} />
+        <ChatInput
+          onSend={handleSendMessage}
+          disabled={isLoading || !selectedLanguage}
+        />
       </main>
     </div>
   );
