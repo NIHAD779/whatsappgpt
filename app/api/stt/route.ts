@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { SarvamAIClient } from "sarvamai";
+import { SarvamAIClient, SarvamAI } from "sarvamai";
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 
@@ -45,8 +45,8 @@ export async function POST(request: NextRequest) {
     // Parse multipart form data
     const formData = await request.formData();
     const file = formData.get("file") as File;
-    const languageCode = formData.get("language_code") as string;
-    const model = (formData.get("model") as string) || "saarika:v2.5";
+    const languageCode = formData.get("language_code") as SarvamAI.SpeechToTextLanguage;
+    const model = ((formData.get("model") as string) || "saarika:v2.5") as SarvamAI.SpeechToTextModel;
 
     // Validate required fields
     if (!file) {
@@ -95,8 +95,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         transcript: response.transcript,
-        language_code: languageCode,
-        duration: response.duration,
+        language_code: response.language_code || languageCode,
         remaining: remaining - 1,
       },
       {

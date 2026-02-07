@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { SarvamAIClient } from "sarvamai";
+import { SarvamAIClient, SarvamAI } from "sarvamai";
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 
@@ -89,16 +89,16 @@ export async function POST(request: NextRequest) {
     // Call translation API
     const response = await client.text.translate({
       input: input,
-      source_language_code: source_language_code,
-      target_language_code: target_language_code,
-      speaker_gender: speaker_gender,
+      source_language_code: source_language_code as SarvamAI.TranslateSourceLanguage,
+      target_language_code: target_language_code as SarvamAI.TranslateTargetLanguage,
+      speaker_gender: speaker_gender as SarvamAI.TranslateSpeakerGender,
     });
 
     return NextResponse.json(
       {
         translated_text: response.translated_text,
         source_language_code: response.source_language_code,
-        target_language_code: response.target_language_code,
+        target_language_code: target_language_code,
         remaining: remaining - 1,
       },
       {
